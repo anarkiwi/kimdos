@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kimdos"
+version = "0.1.0"
+description = "Commodore serial bus disk library and shell for the KIM-1 and its replicas"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+authors = [{ name = "anarkiwi" }]
+keywords = ["kim-1", "6502", "iec", "1541", "sd2iec", "pal-ii", "retrocomputing"]
+dependencies = [
+    "kimtape @ git+https://github.com/anarkiwi/kimtape",
+    "py65",
+]
+
+[project.urls]
+Homepage = "https://github.com/anarkiwi/kimdos"
+
+[project.scripts]
+kimdos = "kimdos.cli:main"
+
+[project.optional-dependencies]
+dev = ["black", "pylint", "pytest", "pytest-cov", "pytest-xdist"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-n auto --cov=kimdos --cov-report=term-missing --cov-fail-under=85"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+# needs a board on a serial line
+omit = ["*/board.py"]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+
+[tool.pylint.main]
+source-roots = ["src"]
+
+[tool.pylint.format]
+max-line-length = 88
+
+[tool.pylint."messages control"]
+disable = ["consider-using-f-string"]
+
+[tool.pylint.basic]
+no-docstring-rgx = "^(test_|_)"
