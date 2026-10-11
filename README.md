@@ -68,4 +68,4 @@ kimdos board --port /dev/ttyUSB0 --install '$' '@'
 - [docs/library.md](docs/library.md) — linking the library into a program, the API
 - [docs/clibrary.md](docs/clibrary.md) — the llvm-mos C library and KIM-1 platform
 - [docs/protocol.md](docs/protocol.md) — the bus protocol as implemented
-- [docs/development.md](docs/development.md) — tests and the simulator
+- [docs/development.md](docs/development.md) — tests, the simulator, releases

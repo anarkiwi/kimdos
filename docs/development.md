@@ -49,3 +49,18 @@ surviving fails in the tests.
 `kimdos board --port /dev/ttyUSB0 --install <commands>` loads the image with
 the monitor, starts the shell and runs each command, printing the replies.
 The board must be in TTY mode with RS pressed beforehand.
+
+## Releases
+
+`.github/workflows/release.yml` publishes to PyPI by trusted publishing (no
+token): PyPI project `kimdos`, owner `anarkiwi`, repository `kimdos`, workflow
+`release.yml`, environment `pypi`.
+
+1. Bump `version` in `pyproject.toml` and merge.
+2. Publish a GitHub release tagged `v<version>`.
+
+The workflow checks the tag matches the version, publishes the wheel and
+sdist to PyPI, and attaches to the release the shell images
+(`kimdos-{2000,0400,C000}.{bin,ptp,lbl}`), `libkimdos.a`, `kimdos.h` and a
+source tarball of the C library. Run from `workflow_dispatch` it is a dry run:
+it builds everything and uploads it as workflow artifacts only.

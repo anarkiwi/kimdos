@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kimdos"
-version = "0.1.0"
+version = "0.2.0"
 description = "Commodore serial bus disk library and shell for the KIM-1 and its replicas"
 readme = "README.md"
 license = "Apache-2.0"
@@ -12,7 +12,7 @@ requires-python = ">=3.11"
 authors = [{ name = "anarkiwi" }]
 keywords = ["kim-1", "6502", "iec", "1541", "sd2iec", "pal-ii", "retrocomputing"]
 dependencies = [
-    "kimtape @ git+https://github.com/anarkiwi/kimtape",
+    "kimtape>=0.1.1",
     "py65",
 ]
 
