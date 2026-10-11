@@ -52,6 +52,7 @@ iec_talk:
 atncmd: pha
         bit bufd
         bpl :+
+        sec
         jsr flush
 :       php
         sei
@@ -128,9 +129,10 @@ iec_ciout:
         ror bufd
         rts
 
-flush:  lda bufb
-        lsr bufd
-        ; fall through, C = EOI
+; Send the held-back byte, C = 1 for EOI.
+flush:  lda #0
+        sta bufd
+        lda bufb
 
 ; Send A as talker, C = 1 for EOI.  CLK is held by us, DATA by a listener.
 txbyte: sta txb
@@ -231,9 +233,11 @@ setst:  ora iec_st
         sta iec_st
         rts
 
+        .segment "DATA"
+bufd:   .byte 0                 ; bit 7: bufb holds a byte not yet sent
+
         .segment "BSS"
 iec_st: .res 1
-bufd:   .res 1
 bufb:   .res 1
 txb:    .res 1
 rxb:    .res 1

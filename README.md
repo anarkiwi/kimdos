@@ -10,14 +10,16 @@ anywhere with ld65. The shell runs over the monitor's TTY:
 
 ```
 KIMDOS
->$
-0 "GAMES           " 00 2A
-4    "MICROCHESS"       PRG
-...
->L MICROCHESS
-$0200-$05FF
->S HIGHSCORE,0200,02FF
+>S PROG,2000,290D
 00, OK,00,00
+>L PROG,4000
+$4000-$490D
+>$
+1 "                " 32 2A
+10   "PROG"             PRG
+65535 BLOCKS FREE.
+>S PROG,2000,2001
+63,FILE EXISTS,00,00
 ```
 
 ## Build and install

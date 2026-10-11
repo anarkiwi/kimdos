@@ -31,7 +31,3 @@ at link time, and nothing in zero page. On a PAL-II, any 8K block switched to
 RAM by `SW5` works; the $0400-$13FF K1-K4 RAM does too if a program does not
 need it.
 
-## Speed
-
-Transfers run at the drive's pace, about 1K a second with a 1541 and somewhat
-faster with an SD2IEC. Saves take longer, as the host clocks each bit.

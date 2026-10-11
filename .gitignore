@@ -224,3 +224,6 @@ __marimo__/
 # build output
 build/
 logs/
+
+# local worktrees
+.claude/worktrees/

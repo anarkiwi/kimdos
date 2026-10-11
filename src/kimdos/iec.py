@@ -184,6 +184,7 @@ class Drive:  # pylint: disable=too-many-instance-attributes
         self.chans = {}
         self.name = bytearray()
         self.cmd = bytearray()
+        self.tail_eoi = None
 
     def advance(self, t):
         """Run the drive state machine up to time t."""
@@ -263,8 +264,12 @@ class Drive:  # pylint: disable=too-many-instance-attributes
             yield from self._talk()
         elif self.listen:
             buf = self._sink()
+            if buf is None:
+                self._out(ALL)
+                return
             while True:
-                buf.append((yield from self._recv(False))[0])
+                b, self.tail_eoi = yield from self._recv(False)
+                buf.append(b)
         self._out(ALL)
 
     def _recv(self, atn):
@@ -379,9 +384,12 @@ class Drive:  # pylint: disable=too-many-instance-attributes
         if self.sa & 15 == 15:
             return self.cmd
         c = self.chans.get(self.sa & 15)
-        return c.data if c is not None and c.write else bytearray()
+        return c.data if c is not None and c.write else None
 
     def _unlisten(self):
+        if self.listen and self.tail_eoi is False:
+            self._error("LISTEN data ended without EOI")
+        self.tail_eoi = None
         if self.listen and self.sa is not None:
             if self.sa >= 0xF0:
                 self._open(self.sa & 15, bytes(self.name))
@@ -405,9 +413,8 @@ class Drive:  # pylint: disable=too-many-instance-attributes
             replace, nm = parse_name(name)
             if nm in self.files and not replace:
                 self.status = status_line(63, b"FILE EXISTS")
-                nm = None
-            else:
-                self.status = OK
+                return
+            self.status = OK
             self.chans[ch] = _Chan(bytearray(), nm, True)
             return
         if name[:1] == b"$":
