@@ -72,6 +72,28 @@ def parse_name(name):
     return bool(m[1]), m[2]
 
 
+def open_mode(name, ch):
+    """(mode, type) of an OPEN name's ,type,mode suffixes as sd2iec reads them.
+
+    Mode is R, W or A; channels 0 and 1 force read and write; the type
+    defaults to PRG on those and SEQ on others.
+    """
+    mode, ftype = b"R", b"D"
+    for f in name.split(b",")[1:3]:
+        c = f[:1]
+        if c in (b"R", b"W", b"A"):
+            mode = c
+        elif c == b"M":
+            mode = b"R"
+        elif c and c in b"DSPU":
+            ftype = c
+    if ch < 2:
+        mode = b"RW"[ch : ch + 1]
+    if ftype == b"D":
+        ftype = b"P" if ch < 2 else b"S"
+    return mode, {b"P": b"PRG", b"S": b"SEQ", b"U": b"USR"}[ftype]
+
+
 class BusTimeout(Exception):
     """Raised by HostBitbang when an expected bus response does not arrive."""
 
@@ -141,6 +163,8 @@ class _Chan:
     name: bytes | None = None
     write: bool = False
     pos: int = 0
+    seek: bool = True
+    ftype: bytes = b"PRG"
 
 
 class Drive:  # pylint: disable=too-many-instance-attributes
@@ -166,6 +190,7 @@ class Drive:  # pylint: disable=too-many-instance-attributes
         disk_id=b"KD",
     ):  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self.files = {} if files is None else files
+        self.types = {}
         self.device, self.present, self.latency = device, present, latency
         self.t_setup, self.t_valid, self.t_ready = t_setup, t_valid, t_ready
         self.sector_delay, self.t_ne, self.t_ack = sector_delay, t_ne, t_ack
@@ -400,34 +425,54 @@ class Drive:  # pylint: disable=too-many-instance-attributes
 
     def _close(self, ch):
         c = self.chans.pop(ch, None)
-        if c is not None and c.write and c.name is not None:
+        if c is not None and c.write:
             self.files[c.name] = bytes(c.data)
+            self.types[c.name] = c.ftype
 
     def _open(self, ch, name):
         if ch == 15:
             if name:
                 self.execute(name)
             return
-        self.chans.pop(ch, None)
-        if ch == 1:
-            replace, nm = parse_name(name)
-            if nm in self.files and not replace:
+        self._close(ch)
+        if name[:1] == b"$":
+            self.status = OK
+            self.chans[ch] = _Chan(self.directory(name[1:]), seek=False)
+            return
+        mode, ftype = open_mode(name, ch)
+        replace, pat = parse_name(name)
+        key = next((k for k in self.files if match(pat, k)), None)
+        if mode == b"W":
+            if key is not None and not replace:
                 self.status = status_line(63, b"FILE EXISTS")
                 return
+            self.files.pop(key, None)
             self.status = OK
-            self.chans[ch] = _Chan(bytearray(), nm, True)
+            self.chans[ch] = _Chan(bytearray(), pat, True, seek=False, ftype=ftype)
             return
-        if name[:1] == b"$":
-            data = self.directory(name[1:])
-        else:
-            pat = parse_name(name)[1]
-            key = next((k for k in self.files if match(pat, k)), None)
-            if key is None:
-                self.status = status_line(62, b"FILE NOT FOUND")
-                return
-            data = self.files[key]
+        if key is None:
+            self.status = status_line(62, b"FILE NOT FOUND")
+            return
         self.status = OK
-        self.chans[ch] = _Chan(data)
+        if mode == b"A":
+            ftype = self.types.get(key, b"PRG")
+            data = bytearray(self.files[key])
+            self.chans[ch] = _Chan(data, key, True, seek=False, ftype=ftype)
+        else:
+            self.chans[ch] = _Chan(self.files[key])
+
+    def _position(self, cmd):
+        c = self.chans.get(cmd[1] & 15) if len(cmd) > 1 else None
+        if c is None:
+            self.status = status_line(70, b"NO CHANNEL")
+        elif not c.seek:
+            self.status = status_line(31, b"SYNTAX ERROR")
+        else:
+            off = int.from_bytes(cmd[2:6].ljust(4, b"\0"), "little")
+            c.pos = min(off, len(c.data))
+            self.status = (
+                OK if off <= len(c.data) else status_line(50, b"RECORD NOT PRESENT")
+            )
 
     def directory(self, pattern=b""):
         """Directory listing as a BASIC program image loaded at $0401."""
@@ -441,8 +486,9 @@ class Drive:  # pylint: disable=too-many-instance-attributes
             used += blocks
             if match(pattern, k):
                 pad = b" " * (4 - len(str(blocks)))
+                ftype = self.types.get(k, b"PRG")
                 lines.append(
-                    (blocks, pad + b'"' + k + b'"' + b" " * (17 - len(k)) + b"PRG")
+                    (blocks, pad + b'"' + k + b'"' + b" " * (17 - len(k)) + ftype)
                 )
         lines.append((max(0, DISK_BLOCKS - used), b"BLOCKS FREE."))
         out, addr = bytearray(b"\x01\x04"), 0x0401
@@ -454,6 +500,9 @@ class Drive:  # pylint: disable=too-many-instance-attributes
 
     def execute(self, cmd):
         """Execute a DOS command string and set the status."""
+        if cmd[:1] == b"P":
+            self._position(cmd)
+            return
         cmd = cmd.rstrip(b"\r")
         if re.fullmatch(rb"I0?:?", cmd):
             self.status = OK
@@ -464,6 +513,7 @@ class Drive:  # pylint: disable=too-many-instance-attributes
             gone = [k for k in self.files if any(match(p, k) for p in pats)]
             for k in gone:
                 del self.files[k]
+                self.types.pop(k, None)
             self.status = status_line(1, b" FILES SCRATCHED", len(gone))
         elif m := re.fullmatch(rb"R\d?:([^=]*)=(.*)", cmd, re.S):
             new, old = m[1], parse_name(m[2])[1]
@@ -473,6 +523,7 @@ class Drive:  # pylint: disable=too-many-instance-attributes
                 self.status = status_line(63, b"FILE EXISTS")
             else:
                 self.files[new] = self.files.pop(old)
+                self.types[new] = self.types.pop(old, b"PRG")
                 self.status = OK
         else:
             self.status = status_line(31, b"SYNTAX ERROR")

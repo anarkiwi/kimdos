@@ -6,7 +6,8 @@ files on a 1541, an SD2IEC/uIEC or anything else that speaks the bus. Written
 from the protocol, not from Commodore's code.
 
 The library uses no zero page, preserves the user port's spare bits, and links
-anywhere with ld65. The shell runs over the monitor's TTY:
+anywhere with ld65; an llvm-mos C version comes with a KIM-1 platform for that
+compiler. The shell runs over the monitor's TTY:
 
 ```
 KIMDOS
@@ -33,6 +34,9 @@ kimtape load --port /dev/ttyUSB0 build/kimdos-2000.ptp --go 2000
 ```
 
 `ORG` is the load address; the image needs about 2.5K of RAM there.
+
+`make clib` builds the C library, `build/c/libkimdos.a`, with llvm-mos in
+docker.
 
 ## Shell
 
@@ -62,5 +66,6 @@ kimdos board --port /dev/ttyUSB0 --install '$' '@'
 
 - [docs/hardware.md](docs/hardware.md) — the adapter and its wiring
 - [docs/library.md](docs/library.md) — linking the library into a program, the API
+- [docs/clibrary.md](docs/clibrary.md) — the llvm-mos C library and KIM-1 platform
 - [docs/protocol.md](docs/protocol.md) — the bus protocol as implemented
 - [docs/development.md](docs/development.md) — tests and the simulator

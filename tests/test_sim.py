@@ -14,6 +14,7 @@ from kimdos.iec import (
     Drive,
     HostBitbang,
     match,
+    open_mode,
     parse_name,
 )
 from kimdos.sim import CYCLES, INPUT, MONITOR, RETURN, ROM_CALL, Kim, Port
@@ -323,3 +324,78 @@ def test_listen_data_without_eoi_is_a_violation():
     h.send(ord("I"))
     h.unlisten()
     assert any("without EOI" in e for e in d.errors)
+
+
+def seek(h, ch, off, n=4):
+    """sd2iec P command: channel byte, then n bytes of little-endian offset."""
+    h.command(b"P" + bytes([0x60 | ch]) + off.to_bytes(4, "little")[:n])
+    return h.status()
+
+
+def test_position():
+    d, h = rig()
+    h.open(8, 2, b"HELLO")
+    assert seek(h, 2, 300) == b"00, OK,00,00\r"
+    assert h.read(8, 2, 4) == PRG[300:304]
+    assert seek(h, 2, 13, 1) == b"00, OK,00,00\r"
+    assert h.read(8, 2) == PRG[13:]
+    assert seek(h, 2, len(PRG) + 1).startswith(b"50,RECORD NOT PRESENT")
+    with pytest.raises(BusTimeout):
+        h.read(8, 2)
+    assert seek(h, 2, len(PRG) - 1) == b"00, OK,00,00\r"
+    assert h.read(8, 2) == PRG[-1:]
+    assert seek(h, 3, 0).startswith(b"70,NO CHANNEL")
+    h.command(b"P")
+    assert h.status().startswith(b"70,")
+    h.open(8, 4, b"$")
+    h.open(8, 5, b"NEW,S,W")
+    assert seek(h, 4, 0).startswith(b"31,")
+    assert seek(h, 5, 0).startswith(b"31,")
+    assert not d.errors
+
+
+@pytest.mark.parametrize(
+    "name,ch,mode",
+    [
+        (b"X", 0, (b"R", b"PRG")),
+        (b"X,S,W", 0, (b"R", b"SEQ")),
+        (b"X", 1, (b"W", b"PRG")),
+        (b"X", 2, (b"R", b"SEQ")),
+        (b"X,P,W", 2, (b"W", b"PRG")),
+        (b"X,W,U", 3, (b"W", b"USR")),
+        (b"X,A", 4, (b"A", b"SEQ")),
+        (b"X,M,D", 4, (b"R", b"SEQ")),
+        (b"X,,Z,W", 4, (b"R", b"SEQ")),
+    ],
+)
+def test_open_mode(name, ch, mode):
+    assert open_mode(name, ch) == mode
+
+
+def test_write_modes():
+    d, h = rig({})
+    h.open(8, 3, b"A,S,W")
+    h.listen(8, 0x63)
+    h.write(b"abc")
+    h.unlisten()
+    h.open(8, 3, b"B,P,W")
+    h.close(8, 3)
+    assert d.files == {b"A": b"abc", b"B": b""}
+    h.open(8, 3, b"A,S,W")
+    assert h.status().startswith(b"63,")
+    h.open(8, 4, b"A,A")
+    h.listen(8, 0x64)
+    h.write(b"de")
+    h.unlisten()
+    h.close(8, 4)
+    assert d.files[b"A"] == b"abcde"
+    h.open(8, 4, b"NOPE,A")
+    assert h.status().startswith(b"62,")
+    h.command(b"R:C=A")
+    lines = basic_lines(h.load(b"$"))
+    assert [t[-3:] for _, t in lines[1:-1]] == [b"PRG", b"SEQ"]
+    h.open(8, 2, b"@0:C,P,W")
+    h.close(8, 2)
+    h.command(b"S:B")
+    assert d.files == {b"C": b""} and d.types == {b"C": b"PRG"}
+    assert not d.errors
