@@ -29,6 +29,9 @@ dev = ["black", "pylint", "pytest", "pytest-cov", "pytest-xdist"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+kimdos = ["c/Dockerfile", "c/include/*.h", "c/src/*", "c/kim1/*", "images/*"]
+
 [tool.pytest.ini_options]
 addopts = "-n auto --cov=kimdos --cov-report=term-missing --cov-fail-under=85"
 testpaths = ["tests"]

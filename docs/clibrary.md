@@ -1,7 +1,10 @@
 # C library
 
-`c/` is KIMDOS for [llvm-mos](https://llvm-mos.org) C programs, with a KIM-1
-platform for the compiler. The bus primitives in `c/src/iec.s` are
+`src/kimdos/c/` is KIMDOS for [llvm-mos](https://llvm-mos.org) C programs,
+with a KIM-1 platform for the compiler. The Python package ships it:
+`python -m kimdos.clib` prints the installed directory (`include/`, `src/`,
+`kim1/`) and `python -m kimdos.clib --sources` the files to compile with a
+program. The bus primitives in `src/kimdos/c/src/iec.s` are
 `asm/lib/iec.s` instruction for instruction; the DOS layer is C with the same
 bus traffic as `asm/lib/dos.s`.
 
@@ -9,25 +12,27 @@ bus traffic as `asm/lib/dos.s`.
 make clib       # build/c/libkimdos.a, build/c/kdtest.bin and kdtest.elf
 ```
 
-The toolchain runs from the image pinned in `c/Dockerfile`; override
+The toolchain runs from the image pinned in `src/kimdos/c/Dockerfile`; override
 `MOS_IMAGE`, or `MOS_CC`/`MOS_AR` for a local install. The repository must be
 under a path docker can bind-mount at the same place.
 
 ## Linking
 
-Compile these with the program, or link `build/c/libkimdos.a`:
+Compile these with the program, or link `build/c/libkimdos.a` (paths under
+the C directory):
 
 | Source | |
 | --- | --- |
-| `c/src/iec.s` | bus primitives |
-| `c/src/dos.c` | files, commands, status, load and save (needs `iec.s`) |
-| `c/src/dir.c` | directory reader (needs `dos.c`) |
-| `c/src/con.s` | console over the monitor's TTY |
-| `c/kim1/crt.s` | start-up and `_Exit` for the KIM-1 platform |
+| `src/iec.s` | bus primitives |
+| `src/dos.c` | files, commands, status, load and save (needs `iec.s`) |
+| `src/dir.c` | directory reader (needs `dos.c`) |
+| `src/con.s` | console over the monitor's TTY |
+| `kim1/crt.s` | start-up and `_Exit` for the KIM-1 platform |
 
 ```sh
-mos-common-clang -Os -flto -I c/include -T c/kim1/link.ld -o prog prog.c \
-    c/kim1/crt.s c/src/iec.s c/src/dos.c c/src/dir.c c/src/con.s
+C=$(python -m kimdos.clib)
+mos-common-clang -Os -flto -I $C/include -T $C/kim1/link.ld -o prog prog.c \
+    $(python -m kimdos.clib --sources)
 ```
 
 This writes `prog`, the raw image to load at $2000, and `prog.elf`.
@@ -36,7 +41,7 @@ llvm-mos release.
 
 ## KIM-1 platform
 
-`c/kim1/link.ld`:
+`kim1/link.ld`:
 
 | Range | |
 | --- | --- |
@@ -73,7 +78,7 @@ its string through `__rc2`/`__rc3`.
 
 ## API
 
-`c/include/kimdos.h`. `iec_st` and the `ST_*` bits are as in
+`include/kimdos.h`. `iec_st` and the `ST_*` bits are as in
 [library.md](library.md#status); every DOS call clears `iec_st` when it
 starts the bus traffic.
 
@@ -132,5 +137,5 @@ loop; every such time is a minimum or a timeout with margin.
 
 ## Testing
 
-`tests/test_clib.py` builds `c/test/kdtest.c` with `make clib` and runs it on
+`tests/test_clib.py` builds `src/kimdos/c/test/kdtest.c` with `make clib` and runs it on
 the simulated KIM-1 against the drive model, comparing its printed results.

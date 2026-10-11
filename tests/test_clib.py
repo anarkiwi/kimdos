@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from kimdos import clib
 from kimdos.iec import JIFFY_AVR_EARLY, JIFFY_AVR_LATE, Drive
 from kimdos.sim import MONITOR, Kim
 
@@ -131,4 +132,13 @@ def instructions(path):
 def test_bus_code_matches_ca65():
     asm = instructions(ROOT / "asm/lib/iec.s")
     assert len(asm) > 300
-    assert instructions(ROOT / "c/src/iec.s") == asm
+    assert instructions(clib.ROOT / "src/iec.s") == asm
+
+
+def test_clib_paths(capsys):
+    clib.main([])
+    assert capsys.readouterr().out.strip() == str(clib.ROOT)
+    clib.main(["--sources"])
+    files = capsys.readouterr().out.split()
+    assert len(files) == len(clib.SOURCES) and all(Path(f).is_file() for f in files)
+    assert (clib.ROOT / "include/kimdos.h").is_file()

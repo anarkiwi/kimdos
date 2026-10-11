@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+IMAGES = Path(__file__).resolve().parent / "images"
 
 
 @dataclass(frozen=True)
@@ -66,3 +67,9 @@ def build(org=0x2000, build_dir=None):
     build_dir = Path(build_dir or ROOT / "build")
     _make(build_dir, "ORG=%04X" % org)
     return Image.load(build_dir / ("kimdos-%04X" % org))
+
+
+def packaged(org=0x2000):
+    """The prebuilt shell image at org shipped in the wheel ($0400, $2000,
+    $C000; `make images` in a checkout)."""
+    return Image.load(IMAGES / ("kimdos-%04X" % org))

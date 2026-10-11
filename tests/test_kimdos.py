@@ -4,6 +4,7 @@ import random
 
 import pytest
 
+from kimdos.build import ROOT, _make, packaged
 from kimdos.iec import JIFFY_AVR_EARLY, JIFFY_AVR_LATE, Drive
 from kimdos.sim import MONITOR, RETURN, Kim
 
@@ -302,3 +303,10 @@ def test_jiffy_switch(image, monkeypatch):
     assert kim.read(0x300, len(PRG) - 2) == PRG[2:]
     assert not drive.jact and kim.read(image["iec_jiffy"]) == b"\0"
     assert word(kim, image.org + 79) == image["iec_jiffy"]
+
+
+def test_packaged_images(image):
+    _make(ROOT / "build", "images")
+    shipped = packaged(image.org)
+    assert shipped.binary == image.binary and shipped.ptp.is_file()
+    assert packaged(0x0400).org == 0x0400 and packaged(0xC000).org == 0xC000

@@ -24,20 +24,21 @@ $4000-$490D
 63,FILE EXISTS,00,00
 ```
 
-## Build and install
-
-Needs cc65 and Python 3.11+.
+## Install
 
 ```sh
-pip install -e .
-make ORG=2000                     # build/kimdos-2000.{bin,ptp,lbl,map}, build/kimdos.lib
-kimtape load --port /dev/ttyUSB0 build/kimdos-2000.ptp --go 2000
+pip install kimdos
+kimtape load --port /dev/ttyUSB0 https://github.com/anarkiwi/kimdos/releases/latest/download/kimdos-2000.ptp --go 2000
 ```
 
-`ORG` is the load address; the image needs about 2.5K of RAM there.
+Each release has the shell at $0400, $2000 and $C000 (`kimdos-<org>.ptp`,
+`.bin`, `.lbl`), also in the package (`kimdos.build.packaged`); it needs
+about 2.5K of RAM there. The package ships the llvm-mos C library:
+`python -m kimdos.clib` prints its directory.
 
-`make clib` builds the C library, `build/c/libkimdos.a`, with llvm-mos in
-docker.
+To build, with cc65: `make ORG=2000` writes `build/kimdos-2000.{bin,ptp,lbl,map}`
+and `build/kimdos.lib`; `make clib` builds `build/c/libkimdos.a` with llvm-mos
+in docker.
 
 ## Shell
 
