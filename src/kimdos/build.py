@@ -42,15 +42,27 @@ def read_labels(path):
     return labels
 
 
-def build(org=0x2000, build_dir=None):
-    """Run make for an image at org and return it."""
-    build_dir = Path(build_dir or ROOT / "build")
+def _make(build_dir, *args):
     build_dir.mkdir(parents=True, exist_ok=True)
     with open(build_dir / ".lock", "w", encoding="ascii") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         subprocess.run(
-            ["make", "-s", "-C", str(ROOT), "ORG=%04X" % org, "BUILD=%s" % build_dir],
+            ["make", "-s", "-C", str(ROOT), "BUILD=%s" % build_dir, *args],
             check=True,
             stdout=subprocess.DEVNULL,
         )
-        return Image.load(build_dir / ("kimdos-%04X" % org))
+
+
+def build_c():
+    """Build the C library and its test program (llvm-mos in docker) under the
+    repository's build directory, which docker can mount; return kdtest.bin."""
+    build_dir = ROOT / "build"
+    _make(build_dir, "clib")
+    return (build_dir / "c" / "kdtest.bin").read_bytes()
+
+
+def build(org=0x2000, build_dir=None):
+    """Run make for an image at org and return it."""
+    build_dir = Path(build_dir or ROOT / "build")
+    _make(build_dir, "ORG=%04X" % org)
+    return Image.load(build_dir / ("kimdos-%04X" % org))

@@ -227,3 +227,4 @@ logs/
 
 # local worktrees
 .claude/worktrees/
+.wt/

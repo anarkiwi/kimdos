@@ -22,6 +22,8 @@ jobs:
         run: black --check --diff src tests
       - name: pylint
         run: pylint src/kimdos tests
+      - name: clang-format
+        run: clang-format --dry-run --Werror --style=LLVM c/include/*.h c/src/*.[ch] c/test/*.c
 
   test:
     runs-on: ubuntu-latest
@@ -36,6 +38,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: sudo apt-get install -y cc65
       - run: pip install -e ".[dev]"
-      - run: make ORG=2000 && make ORG=C000
+      - run: docker pull "$(sed -n 's/^FROM //p' c/Dockerfile)"
+      - run: make ORG=2000 && make ORG=C000 && make clib
       - name: pytest
         run: pytest -q
