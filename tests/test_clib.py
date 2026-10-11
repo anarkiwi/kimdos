@@ -2,10 +2,11 @@
 
 import random
 import re
+from pathlib import Path
 
 import pytest
 
-from kimdos.iec import Drive
+from kimdos.iec import JIFFY_AVR_EARLY, JIFFY_AVR_LATE, Drive
 from kimdos.sim import MONITOR, Kim
 
 ORG = 0x2000
@@ -29,7 +30,7 @@ NEW,SEQ,0001
 DIR=0000
 PROG,PRG,0002
 LOAD=0000 AT=612C SUM={sum_prog:04X} LOAD=0000 AT=012C
-SAVE=0000 SAVE=0080 ST=003F 63,FILE EXISTS,00,00
+SAVE=0000 SAVE={save_exists:04X} ST=003F 63,FILE EXISTS,00,00
 LOAD=0002 ST=003E 62,FILE NOT FOUND,00,00
 CHKIN=0000 GETB=FFFF
 DEV9=00FF \xe1KEY=0061
@@ -37,10 +38,13 @@ BYE
 """
 
 TIMINGS = [
+    {"jiffy": None},
+    {"jiffy": None, "latency": 40, "t_ready": 150},
+    {"jiffy": None, "latency": 50, "t_setup": 70, "t_valid": 70, "sector_delay": 20000},
+    {"jiffy": None, "t_ne": 5, "t_ack": 5, "t_ready": 0},
     {},
-    {"latency": 40, "t_ready": 150},
-    {"latency": 50, "t_setup": 70, "t_valid": 70, "sector_delay": 20000},
-    {"t_ne": 5, "t_ack": 5, "t_ready": 0},
+    {"jiffy": JIFFY_AVR_EARLY, "latency": 1, "sector_delay": 20000},
+    {"jiffy": JIFFY_AVR_LATE, "t_ready": 150},
 ]
 
 
@@ -74,7 +78,11 @@ def run(image, **kw):
 def test_kdtest(kdtest, timing):
     out, _, drive = run(kdtest, **timing)
     assert not drive.errors
-    assert out == EXPECTED.format(sum_data=checksum(DATA), sum_prog=checksum(PROG[2:]))
+    assert out == EXPECTED.format(
+        sum_data=checksum(DATA),
+        sum_prog=checksum(PROG[2:]),
+        save_exists=0x80 if timing.get("jiffy", 1) is None else 0x01,
+    )
     assert drive.files[b"NEW"] == MSG
     assert drive.files[b"COPY"][2:] == PROG[2:18]
     assert b"OUT" not in drive.files
@@ -96,3 +104,31 @@ def test_no_device(kdtest):
     assert fields["LOAD"] == fields["SAVE"] == fields["CHKIN"] == "0080"
     assert fields["GETB"] == "FFFF"
     assert out.endswith("BYE\n")
+
+
+ROOT = Path(__file__).resolve().parents[1]
+JUMPS = {"bne", "beq", "bpl", "bmi", "bcc", "bcs", "bvc", "bvs", "jmp"}
+
+
+def instructions(path):
+    """The instruction stream of a ca65 or GNU-as 6502 source: mnemonics and
+    operands, with labels, comments and number syntax normalised away."""
+    out = []
+    for line in path.read_text(encoding="ascii").splitlines():
+        line = re.sub(r"^(:|[\w.]+:)\s*", "", line.split(";")[0].strip())
+        words = line.split(None, 1)
+        if not words or words[0].startswith(".") or "=" in line:
+            continue
+        op, arg = words[0].lower(), (words[1:] or [""])[0]
+        if op in JUMPS:
+            arg = "L"
+        arg = re.sub(r"[\s\\()<]|&\s*0xFF|^\.L", "", arg.replace("$", "0x"))
+        arg = re.sub(r"0x0*([0-9A-Fa-f]+)", lambda m: str(int(m[1], 16)), arg)
+        out.append((op, arg.lower()))
+    return out
+
+
+def test_bus_code_matches_ca65():
+    asm = instructions(ROOT / "asm/lib/iec.s")
+    assert len(asm) > 300
+    assert instructions(ROOT / "c/src/iec.s") == asm

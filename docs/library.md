@@ -86,8 +86,19 @@ Secondary addresses are passed whole: `$60+ch` data, `$E0+ch` close,
 | `iec_acptr` | | A = byte, Z set for 0 |
 | `iec_unlsn` | | |
 | `iec_untlk` | | |
+| `iec_jload` | A/X = address | after TALK and secondary $61 with `iec_jiffy` bit 7 set: the rest of the file in JiffyDOS LOAD mode; A/X = one past the last byte, `ST_EOI` |
 
-All preserve X and Y.
+All preserve X and Y (`iec_jload` returns in X).
+
+## JiffyDOS
+
+`iec_jiffy` bit 0 (set by default) lets `iec_listen` and `iec_talk` offer
+JiffyDOS; a device that answers gets the data bytes of that transaction in
+JiffyDOS, and bit 7 says so until the next TALK or LISTEN. Store 0 to force
+the standard protocol, from the shell with `J0`, for a device that
+misbehaves. The DOS layer needs nothing else: `dos_load` uses LOAD mode by
+itself. With JiffyDOS, a listener that has gone away shows as `ST_WTO`, not
+`ST_DNP`. [protocol.md](protocol.md#jiffydos) has the timing.
 
 ## Console
 
@@ -118,4 +129,4 @@ against the library, a BASIC `USR` routine say, can still call it:
 | +36 | `dos_save` | | |
 
 Then the addresses of the variables: +69 `dos_dev`, +71 `iec_st`, +73
-`dos_beg`, +75 `dos_end`, +77 `dos_errbuf`.
+`dos_beg`, +75 `dos_end`, +77 `dos_errbuf`, +79 `iec_jiffy`.

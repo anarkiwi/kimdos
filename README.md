@@ -2,8 +2,9 @@
 
 Commodore serial bus (IEC) disk access for the KIM-1, PAL-1/PAL-II and other
 replicas: a 6502 library, and a shell built on it, that load and save CBM DOS
-files on a 1541, an SD2IEC/uIEC or anything else that speaks the bus. Written
-from the protocol, not from Commodore's code.
+files on a 1541, an SD2IEC/uIEC or anything else that speaks the bus, with
+JiffyDOS for devices that have it. Written from the protocol, not from
+Commodore's code.
 
 The library uses no zero page, preserves the user port's spare bits, and links
 anywhere with ld65; an llvm-mos C version comes with a KIM-1 platform for that
@@ -49,6 +50,7 @@ docker.
 | `V name[,addr]` | verify against memory |
 | `S name,start,end` | save `start`-`end` inclusive; `@0:name` replaces |
 | `#[device]` | show or set the device number (decimal, default 8) |
+| `J[0\|1]` | show, or turn off or on, JiffyDOS (default on) |
 | `Q` | return to the monitor; `G` then runs what was loaded |
 
 Names may be quoted. From the keypad, put the KIM tape ID in $17F9 and run
@@ -59,6 +61,8 @@ for a tape save and run `ORG+6` to save.
 
 ```sh
 kimdos sim --dir ./disk           # the shell against .prg files in ./disk
+kimdos sim --no-jiffy             # against a drive without JiffyDOS
+kimdos bench                      # cycles per byte and JiffyDOS margins
 kimdos board --port /dev/ttyUSB0 --install '$' '@'
 ```
 

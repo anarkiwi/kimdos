@@ -4,15 +4,18 @@ import random
 
 import pytest
 
-from kimdos.iec import Drive
+from kimdos.iec import JIFFY_AVR_EARLY, JIFFY_AVR_LATE, Drive
 from kimdos.sim import MONITOR, RETURN, Kim
 
 PRG = b"\x00\x03" + bytes(range(256)) * 3
 TIMINGS = [
+    {"jiffy": None},
+    {"jiffy": None, "latency": 40, "t_ready": 150},
+    {"jiffy": None, "latency": 50, "t_setup": 70, "t_valid": 70, "sector_delay": 20000},
+    {"jiffy": None, "t_ne": 5, "t_ack": 5, "t_ready": 0},
     {},
-    {"latency": 40, "t_ready": 150},
-    {"latency": 50, "t_setup": 70, "t_valid": 70, "sector_delay": 20000},
-    {"t_ne": 5, "t_ack": 5, "t_ready": 0},
+    {"jiffy": JIFFY_AVR_EARLY, "latency": 1, "sector_delay": 20000},
+    {"jiffy": JIFFY_AVR_LATE, "t_ready": 150},
 ]
 
 
@@ -258,3 +261,44 @@ def test_jump_table(image):
     names = ["dos_dev", "iec_st", "dos_beg", "dos_end", "dos_errbuf"]
     for i, name in enumerate(names):
         assert word(kim, image.org + 69 + 2 * i) == image[name]
+
+
+def test_jiffy_switch(image, monkeypatch):
+    used = []
+    talk = Drive._jtalk_load  # pylint: disable=protected-access
+
+    def spy(self, chan):
+        used.append(chan.pos)
+        return talk(self, chan)
+
+    monkeypatch.setattr(Drive, "_jtalk_load", spy)
+    out, _ = shell(
+        image,
+        "J",
+        "L HELLO",
+        "J0",
+        "J",
+        "L HELLO",
+        "J2",
+        "J1 X",
+        "J1",
+        files={b"HELLO": PRG},
+    )
+    assert out == [
+        "1",
+        "$0300-$05FF",
+        "0",
+        "0",
+        "$0300-$05FF",
+        "?SYNTAX",
+        "?SYNTAX",
+        "1",
+    ]
+    assert used == [2]
+    kim, drive = machine(image, {b"HELLO": PRG})
+    kim.write(image["iec_jiffy"], b"\0")
+    setnam(kim, image, b"HELLO")
+    assert kim.call(image["dos_load"]).reason == RETURN
+    assert kim.read(0x300, len(PRG) - 2) == PRG[2:]
+    assert not drive.jact and kim.read(image["iec_jiffy"]) == b"\0"
+    assert word(kim, image.org + 79) == image["iec_jiffy"]

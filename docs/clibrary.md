@@ -95,6 +95,7 @@ starts the bus traffic.
 | `kd_load(name, len, addr, &end)` | channel 0, to `addr` or the file's own address; `iec_st` without `ST_EOI` |
 | `kd_save(name, len, beg, end)` | channel 1, a PRG file with load address `beg`; `iec_st` |
 | `kd_putc`, `kd_getc`, `kd_puts` | console |
+| `iec_jload(addr)` | after TALK and secondary 0x61 to a JiffyDOS device: the rest of the file to `addr` up; one past the end |
 
 `kd_read`, `kd_dir_next` and the rest end each transfer with UNTALK or
 UNLISTEN, so other channels can be used between calls. Opening with a name
@@ -103,6 +104,10 @@ replaces an existing one. `kd_seek` is sd2iec's `P` for ordinary files
 (Commodore drives position only REL files with `P`). Offsets count from the
 first byte of the file, including a PRG file's load address; past the end the
 code is 50, RECORD NOT PRESENT.
+
+`iec_jiffy` switches JiffyDOS as in [library.md](library.md#jiffydos):
+`iec_jiffy = 0;` forces the standard protocol. `kd_load` uses JiffyDOS LOAD
+mode with a device that answers.
 
 A load of a missing file returns `ST_RTO` and touches no memory; the status
 channel then says 62, FILE NOT FOUND. `kd_dirent.name` is raw PETSCII and

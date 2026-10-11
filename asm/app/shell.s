@@ -36,6 +36,7 @@ LINEMAX = 72
         .addr dos_beg           ; +73
         .addr dos_end           ; +75
         .addr dos_errbuf        ; +77
+        .addr iec_jiffy         ; +79
 
 ; ----------------------------------------------------------- keypad entry
 
@@ -159,9 +160,9 @@ dispatch:
         pha
         rts
 
-cmdch:  .byte "$@LVS#Q?"
+cmdch:  .byte "$@LVS#JQ?"
 NCMDS = * - cmdch
-.define CMDS c_dir-1, c_dos-1, c_load-1, c_verify-1, c_save-1, c_dev-1, KIM_START-1, c_help-1
+.define CMDS c_dir-1, c_dos-1, c_load-1, c_verify-1, c_save-1, c_dev-1, c_jiffy-1, KIM_START-1, c_help-1
 cmdlo:  .lobytes CMDS
 cmdhi:  .hibytes CMDS
 
@@ -319,6 +320,23 @@ c_dev:  jsr skipsp
         ldx #0
         jmp con_pdec
 
+; J[0|1]: JiffyDOS off or on
+c_jiffy:
+        jsr skipsp
+        beq :+
+        jsr decval
+        bcs jserr
+        cmp #2
+        bcs jserr
+        ldy line+1,x
+        bne jserr
+        sta iec_jiffy
+:       lda iec_jiffy
+        and #1
+        ldx #0
+        jmp con_pdec
+jserr:  jmp syntax
+
 c_help: ldx #<m_help
         ldy #>m_help
         jmp con_puts
@@ -450,6 +468,7 @@ m_help: .byte "$[PAT]       DIRECTORY", $0D, $0A
         .byte "V F[,ADDR]   VERIFY", $0D, $0A
         .byte "S F,BEG,END  SAVE", $0D, $0A
         .byte "#[DEV]       DEVICE", $0D, $0A
+        .byte "J[0|1]       JIFFYDOS OFF/ON", $0D, $0A
         .byte "Q            MONITOR", 0
 
         .segment "DATA"

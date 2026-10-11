@@ -18,6 +18,9 @@ extern "C" {
 #define ST_DNP 0x80 /* no device answered */
 
 extern uint8_t iec_st; /* status bits collected by the bus primitives */
+/* bit 0: offer JiffyDOS (default 1); 0 forces the standard protocol.
+ * bit 7: set by iec_listen/iec_talk when the device answered */
+extern uint8_t iec_jiffy;
 extern uint8_t kd_dev; /* device number, default 8 */
 
 /* bus primitives (asm, same semantics as asm/lib/iec.s) */
@@ -29,6 +32,9 @@ KD_ASM void iec_ciout(uint8_t b);
 KD_ASM uint8_t iec_acptr(void);
 KD_ASM void iec_unlsn(void);
 KD_ASM void iec_untlk(void);
+/* after TALK and secondary 0x61 to a device in iec_jiffy bit 7: the rest of
+ * the file in JiffyDOS LOAD mode to addr up; returns one past the end */
+KD_ASM uint16_t iec_jload(uint16_t addr);
 
 /* DOS layer: functions returning uint8_t return 0 on success, else nonzero
  * (iec_st bits or a DOS error code as documented) */

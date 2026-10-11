@@ -11,6 +11,9 @@
 .global iec_unlsn
 .global iec_untlk
 .global iec_st                  ; status byte, ST_* bits
+.global iec_jiffy               ; bit 0: JiffyDOS on (default), 0 forces
+                                ; the standard protocol; bit 7: in use
+.global iec_jload               ; A/X = address: JiffyDOS LOAD mode stream
 
 ; DOS layer (dos.s)
 .global dos_dev                 ; device number, default 8

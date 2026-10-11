@@ -4,15 +4,14 @@ from types import SimpleNamespace
 
 import pytest
 
+from kimdos.host import BusTimeout, HostBitbang
 from kimdos.iec import (
     ALL,
     ATN,
     CLK,
     DATA,
     Bus,
-    BusTimeout,
     Drive,
-    HostBitbang,
     match,
     open_mode,
     parse_name,
