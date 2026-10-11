@@ -41,8 +41,41 @@ the host's lines, `t_ready`, `t_setup`, `t_valid`, `t_ne` and `t_ack` stretch
 its own timing, and `sector_delay` stalls every 254 bytes. It records
 protocol violations in `drive.errors`, which every test checks is empty.
 
+The drive speaks JiffyDOS by default with sd2iec's LPC17xx timing; `jiffy`
+takes `JIFFY_AVR_EARLY` or `JIFFY_AVR_LATE` for the AVR build at either end
+of its polling phase, or `None` for a drive without it. In Jiffy transfers
+it also checks that the host reads and drives the bus at least `margin` us
+(default 2) away from its own edges and sample points, and it ignores ATN
+where sd2iec does. `kimdos.host.HostBitbang` is a scripted host for the
+model, standard or Jiffy (`jiffy=True`), with the 6502 library's schedules.
+
 Traps clobber X and Y, as the real monitor may, so code that relies on them
 surviving fails in the tests.
+
+## Throughput and margins
+
+`kimdos bench` (`kimdos.bench`) runs the library on the simulator and
+prints cycles per byte, with fixed costs cancelled over two file sizes, for
+`dos_read` of an open file, `dos_write` and `dos_load` (1 MHz: cycles are
+microseconds), then the largest margin each device timing leaves at a
+latency of 0-2 us:
+
+| | Standard | JiffyDOS |
+| --- | --- | --- |
+| read | 508 | 259 |
+| write | 1339 | 370 |
+| load | 508 | 114 |
+
+| Device timing | 0 us | 1 us | 2 us |
+| --- | --- | --- | --- |
+| sd2iec LPC17xx | 4.00 | 4.25 | 4.00 |
+| sd2iec AVR, early phase | 3.75 | 4.50 | 3.50 |
+| sd2iec AVR, late phase | 4.50 | 4.00 | 3.00 |
+
+`tests/test_jiffy.py` requires 3 us at latencies 0 and 1 us for every
+timing. A Jiffy read pays a handshake and the call path (`dos_getb`,
+`iec_acptr`) per byte; load uses LOAD mode, one byte per 114 cycles with no
+handshake.
 
 ## On a board
 

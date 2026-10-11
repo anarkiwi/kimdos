@@ -199,10 +199,24 @@ dos_load:
         lda #0
         sta dos_end
         sta dos_end+1
+        bit vfy
+        bmi ldstd
+        lda iec_st
+        bne ldstd
+        bit iec_jiffy
+        bpl ldstd
+        ldy #0
+        jsr nmop
+        cmp #'$'
+        beq ldstd
+        jsr ldjif
+        bcs ldnf
         pla
+        jmp ldend
+ldstd:  pla
         ldx vfy
         jsr rdinto
-        lda dos_beg
+ldend:  lda dos_beg
         sta dos_end
         lda dos_beg+1
         sta dos_end+1
@@ -225,6 +239,25 @@ ldclose:
         rts
 
 ldop:   .byte $8D, $CD          ; STA abs, CMP abs
+
+; The rest of a load in JiffyDOS LOAD mode to dos_beg; C = 1 if the device
+; did not take the TALK.
+ldjif:  jsr iec_untlk
+        lda dos_dev
+        jsr iec_talk
+        lda #$61
+        jsr iec_tksa
+        lda iec_st
+        cmp #1
+        bcs :+
+        lda dos_beg
+        ldx dos_beg+1
+        jsr iec_jload
+        sta dos_beg
+        stx dos_beg+1
+        jsr iec_untlk
+        clc
+:       rts
 
 ; Save dos_beg up to dos_end (exclusive) to the named file.
 dos_save:

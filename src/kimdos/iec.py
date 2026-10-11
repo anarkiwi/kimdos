@@ -18,6 +18,73 @@ T_FRAME = 1000
 T_TURN = 80
 BLOCK = 254
 DISK_BLOCKS = 664
+T_JDET = 218
+T_JACK = 101
+T_JTALK = 360
+T_JREADY = 50
+T_JEOF = 100
+T_JREFILL = 120
+T_JHOST = 400
+T_JPOST = 30
+RX_BITS = ((4, 5), (6, 7), (3, 1), (2, 0))
+SINGLE, MID, FINAL = range(3)
+
+
+@dataclass(frozen=True)
+class JiffyTiming:  # pylint: disable=too-many-instance-attributes
+    """Device-side JiffyDOS timing, us after the host's start edge.
+
+    tx: the drive talking, when each of the four bit pairs (CLK = bit 2k,
+    DATA = bit 2k+1, released = 1) and then the EOI/status mark go out.
+    rx: the drive listening, when it samples the four bit pairs (bits
+    RX_BITS, pulled = 1) and then CLK for EOI; ack: when it pulls DATA, for
+    pulse. hold: after the host acknowledges a sent byte, before returning.
+    gap: LOAD mode, last pair to the release for the next byte. arm_tx,
+    arm_rx: from releasing the bus to watching for the host's start edge.
+    """
+
+    tx: tuple
+    rx: tuple
+    ack: float
+    pulse: float
+    hold: float
+    gap: float
+    arm_tx: float
+    arm_rx: float
+
+
+def _avr(phase_tx, phase_rx):
+    """sd2iec on an 8 MHz AVR (fastloader-ll.S as built by avr-gcc 7.3): cycle
+    offsets of each port access after the polling loop saw the start edge
+    phase cycles late."""
+    return JiffyTiming(
+        tx=tuple((79 + phase_tx + c) / 8 for c in (0, 80, 168, 248, 336)),
+        rx=tuple((136 + phase_rx + c) / 8 for c in (0, 104, 192, 296, 400)),
+        ack=(136 + phase_rx + 450) / 8,
+        pulse=10,
+        hold=0,
+        gap=83 / 8,
+        arm_tx=10 / 8,
+        arm_rx=2 / 8,
+    )
+
+
+JIFFY_LPC = JiffyTiming(
+    tx=(10, 20, 31, 41, 52),
+    rx=(18.5, 31.5, 42.5, 55.5, 67),
+    ack=73,
+    pulse=10,
+    hold=10,
+    gap=10,
+    arm_tx=3,
+    arm_rx=1,
+)
+JIFFY_AVR_EARLY = _avr(0.5, 0.5)
+JIFFY_AVR_LATE = _avr(6.5, 5.5)
+
+
+def _any(_):
+    return True
 
 
 def _clk_rel(v):
@@ -94,10 +161,6 @@ def open_mode(name, ch):
     return mode, {b"P": b"PRG", b"S": b"SEQ", b"U": b"USR"}[ftype]
 
 
-class BusTimeout(Exception):
-    """Raised by HostBitbang when an expected bus response does not arrive."""
-
-
 class Bus:
     """Wired-AND serial bus with a timed history of host outputs."""
 
@@ -130,8 +193,12 @@ class Bus:
         return m
 
     def lines(self, t):
-        """Bus line state seen by the host at time t."""
+        """Bus line state seen by the host at time t; a drive in a JiffyDOS
+        transfer notes the read."""
         self.sync(t)
+        for d in self.drives:
+            if d.reads is not None:
+                d.reads.append(t)
         return self.host & self.outputs()
 
     def set_host(self, mask, t):
@@ -148,13 +215,21 @@ class Bus:
         self.times.append(t)
         self.states.append(mask)
         if len(self.times) > 4096:
-            lo = min((d.now - d.latency for d in self.drives if d.present), default=t)
+            lo = min(
+                (min(d.now - d.latency, d.keep) for d in self.drives if d.present),
+                default=t,
+            )
             i = bisect_right(self.times, lo) - 1
             del self.times[:i], self.states[:i]
 
     def host_at(self, t):
         """Host output mask at time t."""
         return self.states[bisect_right(self.times, t) - 1]
+
+    def changed(self, lo, hi, bits):
+        """Whether the host changed any of bits in (lo, hi]."""
+        i, j = bisect_right(self.times, lo) - 1, bisect_right(self.times, hi)
+        return any((s ^ self.states[i]) & bits for s in self.states[i + 1 : j])
 
 
 @dataclass(slots=True)
@@ -172,6 +247,9 @@ class Drive:  # pylint: disable=too-many-instance-attributes
 
     files maps PETSCII names to contents (PRG contents include the load
     address). The drive reacts to host line changes `latency` us late.
+    jiffy is the JiffyDOS timing (None for a drive without it); in Jiffy
+    transfers the host must sample and drive the bus at least `margin` us
+    away from the drive's own edges and sample points.
     """
 
     def __init__(
@@ -188,6 +266,8 @@ class Drive:  # pylint: disable=too-many-instance-attributes
         t_ack=20,
         disk_name=b"KIMDOS",
         disk_id=b"KD",
+        jiffy=JIFFY_LPC,
+        margin=2,
     ):  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self.files = {} if files is None else files
         self.types = {}
@@ -195,6 +275,12 @@ class Drive:  # pylint: disable=too-many-instance-attributes
         self.t_setup, self.t_valid, self.t_ready = t_setup, t_valid, t_ready
         self.sector_delay, self.t_ne, self.t_ack = sector_delay, t_ne, t_ack
         self.disk_name, self.disk_id = disk_name, disk_id
+        self.jiffy, self.margin = jiffy, margin
+        self.jact = self.jload = False
+        self.reads = None
+        self.keep = NEVER
+        self.deaf = 0
+        self.jpend = None
         self.errors = []
         self.status = status_line(73, b"KIMDOS SIM")
         self.bus = None
@@ -248,7 +334,9 @@ class Drive:  # pylint: disable=too-many-instance-attributes
         t = self.now
         while t <= end:
             v = states[i] & mask
-            if (not self.in_atn and not v & ATN) or (pred is not None and pred(v)):
+            if (not self.in_atn and not v & ATN and t >= self.deaf) or (
+                pred is not None and pred(v)
+            ):
                 return t, v
             i += 1
             if i == len(times):
@@ -270,7 +358,16 @@ class Drive:  # pylint: disable=too-many-instance-attributes
     def _error(self, msg):
         self.errors.append(f"{self.now}: {msg}")
 
+    def _at(self, t, deaf=False):
+        """Wait until t; deaf: ignore ATN meanwhile, as sd2iec's busy loops do."""
+        if deaf:
+            self.deaf = t
+        if t > self.now:
+            yield None, t
+
     def _session(self):
+        self.jact = self.jload = False
+        self.jpend = None
         self._out(CLK)
         while True:
             r = yield from self._recv(True)
@@ -293,7 +390,9 @@ class Drive:  # pylint: disable=too-many-instance-attributes
                 self._out(ALL)
                 return
             while True:
-                b, self.tail_eoi = yield from self._recv(False)
+                b, self.tail_eoi = yield from (
+                    self._jrecv() if self.jact else self._recv(False)
+                )
                 buf.append(b)
         self._out(ALL)
 
@@ -317,6 +416,8 @@ class Drive:  # pylint: disable=too-many-instance-attributes
             yield _clk_asr, NEVER
         b = 0
         for i in range(8):
+            if i == 7 and atn and b < 0x60 and b & 0x1F == self.device:
+                yield from self._jdetect()
             v = yield _clk_rel, NEVER
             t1, d = self.now, v & DATA
             v = yield (lambda v, d=d: not v & CLK or v & DATA != d), NEVER
@@ -328,6 +429,128 @@ class Drive:  # pylint: disable=too-many-instance-attributes
             b |= (d >> 2) << i
         yield None, self.now + self.t_ack
         self._out(CLK)
+        return b, eoi
+
+    def _jdetect(self):
+        """A host delaying the last bit of TALK/LISTEN past T_JDET speaks
+        JiffyDOS: pull DATA for T_JACK in reply."""
+        if self.jiffy is None or self.jact:
+            return
+        if (yield _clk_rel, self.now + T_JDET) is not None:
+            return
+        self._out(CLK)
+        t1 = self.now
+        self.keep = t1 - self.latency - 1
+        yield None, self.now + T_JACK
+        self._out(ALL)
+        self.jact = True
+        lat = self.latency
+        if self.bus.changed(t1 - lat, self.now - lat, CLK):
+            self._error("host moved CLK during the JiffyDOS acknowledge")
+        self.keep = NEVER
+
+    def _check_reads(self, start, end, allowed, required):
+        """Host bus reads in [start, end) must fall in an allowed window and
+        each required window needs one; windows are (lo, hi) with the margin
+        already taken off."""
+        reads = [t for t in self.reads if start <= t < end]
+        self.reads = [t for t in self.reads if t >= end]
+        for t in reads:
+            if not any(lo <= t <= hi for lo, hi in allowed):
+                self._error(f"Jiffy: host sampled at +{t - start:g}us, off the windows")
+        for lo, hi in required:
+            if not any(lo <= t <= hi for t in reads):
+                self._error(f"Jiffy: no sample in +{lo - start:g}..+{hi - start:g}us")
+
+    def _jsend(self, b, eoi, mode):
+        """Send b as sd2iec's jiffy_send: SINGLE for a byte with EOI/status
+        and the host's acknowledge, MID/FINAL for LOAD mode."""
+        jt, m = self.jiffy, self.margin
+        self._out(ALL)
+        yield from self._at(self.now + jt.arm_tx)
+        v = yield _any, NEVER
+        if mode == SINGLE:
+            if v & DATA:
+                self._error("Jiffy: host released DATA before the drive was armed")
+            else:
+                yield _data_rel, NEVER
+        else:
+            if not v & DATA:
+                self._error("Jiffy LOAD: host pulled DATA before the drive was armed")
+                yield _data_rel, NEVER
+            yield _data_asr, NEVER
+        ref = self.now
+        self.deaf = ref + jt.tx[3]
+        if self.jpend is not None:
+            self._check_reads(*self.jpend[:1], ref, *self.jpend[1:])
+        elif self.reads is None:
+            self.reads = []
+        for k in range(4):
+            yield from self._at(ref + jt.tx[k])
+            self._out(
+                (CLK if b >> 2 * k & 1 else 0) | (DATA if b >> 2 * k + 1 & 1 else 0)
+            )
+        last = ref + (jt.tx[3] + jt.gap if mode == MID else jt.tx[4])
+        pairs = [(ref + jt.tx[k] + m, ref + jt.tx[k + 1] - m) for k in range(3)]
+        pairs.append((ref + jt.tx[3] + m, last - m))
+        if mode == MID:
+            yield from self._at(last)
+            self.jpend = ref, pairs + [(last + m, NEVER)], pairs
+            return
+        self.jpend = None
+        yield from self._at(last)
+        self._out(CLK if eoi else DATA)
+        yield _data_asr, NEVER
+        end = self.now
+        yield from self._at(self.now + jt.hold, deaf=True)
+        if eoi:
+            yield from self._at(self.now + T_JREADY, deaf=True)
+            end = self.now
+            self._out(DATA)
+        status = [(last + m, end - (m if eoi else 0))]
+        self._check_reads(ref, self.now, pairs + [(last + m, NEVER)], pairs + status)
+        self.reads = None
+
+    def _jrecv(self):
+        """Receive a byte as sd2iec's jiffy_receive; return (byte, eoi)."""
+        jt, lat, m = self.jiffy, self.latency, self.margin
+        self._out(ALL)
+        v = yield _any, NEVER
+        if v & CLK:
+            self._error("Jiffy: CLK released before the drive was ready")
+        else:
+            yield from self._at(self.now + jt.arm_rx)
+            if (yield _any, NEVER) & CLK:
+                self._error("Jiffy: host released CLK before the drive was armed")
+            else:
+                yield _clk_rel, NEVER
+        ref = self.now
+        self.deaf = ref + jt.ack + jt.pulse
+        self.keep = ref - lat - m - 1
+        self.reads = []
+        b = 0
+        for k, (cb, db) in enumerate(RX_BITS):
+            yield from self._at(ref + jt.rx[k])
+            v = yield _any, NEVER
+            b |= (not v & CLK) << cb | (not v & DATA) << db
+        yield from self._at(ref + jt.rx[4])
+        v = yield _any, NEVER
+        if not v & ATN:
+            self.deaf = self.now
+            yield IDLE
+        eoi = bool(v & CLK)
+        yield from self._at(ref + jt.ack)
+        self._out(CLK)
+        t_ack = self.now
+        yield from self._at(self.now + jt.pulse)
+        for t in jt.rx:
+            if self.bus.changed(ref + t - lat - m, ref + t - lat + m, CLK | DATA):
+                self._error(f"Jiffy: host changed the bus at the +{t:g}us sample")
+        self._check_reads(
+            ref, self.now, [(t_ack + m, NEVER)], [(t_ack + m, self.now - m)]
+        )
+        self.reads = None
+        self.keep = NEVER
         return b, eoi
 
     def _send(self, b, eoi, extra):
@@ -363,16 +586,48 @@ class Drive:  # pylint: disable=too-many-instance-attributes
             yield None, self.now + self.t_ready
             self._out(ALL)
             yield IDLE
+        if self.jact:
+            yield from self._at(self.now + T_JTALK, deaf=True)
+        if self.jload:
+            yield from self._jtalk_load(chan)
+            return
         n = len(chan.data)
         while chan.pos < n:
             extra = self.sector_delay if ch != 15 and chan.pos % BLOCK == 0 else 0
-            if not (
-                yield from self._send(chan.data[chan.pos], chan.pos == n - 1, extra)
-            ):
+            eoi = chan.pos == n - 1
+            if self.jact:
+                yield from self._at(self.now + extra, deaf=True)
+                yield from self._jsend(chan.data[chan.pos], eoi, SINGLE)
+            elif not (yield from self._send(chan.data[chan.pos], eoi, extra)):
                 return
             chan.pos += 1
         if ch == 15:
             self.status = OK
+
+    def _jtalk_load(self, chan):
+        """JiffyDOS LOAD: blocks of bytes without handshakes, each block
+        ended by a CLK-held marker the host acknowledges."""
+        yield _data_rel, NEVER
+        chan.pos += 2 - chan.pos % BLOCK
+        n = len(chan.data)
+        while True:
+            self._out(CLK)
+            yield from self._at(self.now + T_JREADY, deaf=True)
+            end = min(n, chan.pos - chan.pos % BLOCK + BLOCK)
+            while chan.pos < end:
+                final = chan.pos == end - 1
+                yield from self._jsend(
+                    chan.data[chan.pos], False, FINAL if final else MID
+                )
+                chan.pos += 1
+            if chan.pos >= n:
+                for mask in (ALL, DATA, ALL):
+                    yield from self._at(self.now + T_JEOF, deaf=True)
+                    self._out(mask)
+                return
+            yield from self._at(self.now + self.sector_delay, deaf=True)
+            self.deaf = self.now + T_JREFILL
+            yield _data_rel, self.deaf
 
     def _command(self, b):
         if b == 0x3F:
@@ -391,6 +646,8 @@ class Drive:  # pylint: disable=too-many-instance-attributes
                 self.talk = True
             self.sa = None
         elif self.listen or self.talk:
+            if b == 0x61 and self.talk and self.jiffy is not None:
+                b, self.jload = 0x60, True
             hi = b & 0xF0
             if hi == 0xE0:
                 self._close(b & 15)
@@ -527,177 +784,3 @@ class Drive:  # pylint: disable=too-many-instance-attributes
                 self.status = OK
         else:
             self.status = status_line(31, b"SYNTAX ERROR")
-
-
-class HostBitbang:  # pylint: disable=too-many-instance-attributes
-    """Scripted host-side bus controller running in simulated time.
-
-    Polls every `poll` us; `t_setup`/`t_valid` are its bit timings, `t_ne` its
-    delay before asserting CLK for a byte and `t_atn` its hold after ATN
-    before the first command byte.
-    """
-
-    def __init__(
-        self, bus, poll=2, t_setup=20, t_valid=20, t_ne=10, t_atn=T_FRAME
-    ):  # pylint: disable=too-many-arguments,too-many-positional-arguments
-        self.bus, self.poll, self.timeout = bus, poll, 2_000_000
-        self.t_setup, self.t_valid, self.t_ne = t_setup, t_valid, t_ne
-        self.t_atn = t_atn
-        self.t = 0
-        self.mask = bus.host
-
-    def set(self, release=0, assert_=0):
-        """Release and assert host lines at the current time."""
-        self.mask = (self.mask | release) & ~assert_ & ALL
-        self.bus.set_host(self.mask, self.t)
-
-    def delay(self, us):
-        """Advance host time."""
-        self.t += us
-
-    def wait(self, pred, timeout):
-        """Poll until pred(lines) holds; return the lines or None on timeout."""
-        end = self.t + timeout
-        while True:
-            v = self.bus.lines(self.t)
-            if pred(v):
-                return v
-            if self.t >= end:
-                return None
-            self.t = min(self.t + self.poll, end)
-
-    def _must(self, pred, timeout, what):
-        v = self.wait(pred, timeout)
-        if v is None:
-            raise BusTimeout(f"{self.t}: {what}")
-        return v
-
-    def send(self, b, eoi=False):
-        """Send one byte as talker (CLK held asserted on entry and exit)."""
-        self.set(release=CLK)
-        self._must(_data_rel, self.timeout, "listener not ready")
-        if eoi:
-            self._must(_data_asr, T_FRAME, "EOI ack")
-            self._must(_data_rel, T_FRAME, "EOI ack end")
-        self.delay(self.t_ne)
-        self.set(assert_=CLK)
-        for i in range(8):
-            bit = DATA if b >> i & 1 else 0
-            self.set(release=bit, assert_=DATA ^ bit)
-            self.delay(self.t_setup)
-            self.set(release=CLK)
-            self.delay(self.t_valid)
-            self.set(release=DATA, assert_=CLK)
-        self._must(_data_asr, T_FRAME, "frame ack")
-
-    def recv(self, ack=True):
-        """Receive one byte as listener; return (byte, eoi)."""
-        self._must(_clk_rel, self.timeout, "talker not ready")
-        self.set(release=DATA)
-        eoi = self.wait(_clk_asr, T_EOI) is None
-        if eoi:
-            self.set(assert_=DATA)
-            self.delay(T_EOI_ACK + 4)
-            self.set(release=DATA)
-            self._must(_clk_asr, T_FRAME, "read timeout")
-        b = 0
-        for i in range(8):
-            v = self._must(_clk_rel, T_FRAME, f"bit {i} start")
-            b |= (v >> 2 & 1) << i
-            self._must(_clk_asr, T_FRAME, f"bit {i} end")
-        if ack:
-            self.set(assert_=DATA)
-        return b, eoi
-
-    def write(self, data):
-        """Send bytes as talker, EOI on the last."""
-        for i, b in enumerate(data):
-            self.send(b, i == len(data) - 1)
-
-    def atn(self, *cmds):
-        """Assert ATN and send command bytes."""
-        self.set(release=DATA, assert_=ATN | CLK)
-        t0 = self.t
-        self._must(_data_asr, T_FRAME, "device not present")
-        self.t = max(self.t, t0 + self.t_atn)
-        for c in cmds:
-            self.send(c)
-
-    def listen(self, dev, sa):
-        """LISTEN dev with secondary sa; host stays talker."""
-        self.atn(0x20 + dev, sa)
-        self.set(release=ATN)
-        self.delay(20)
-
-    def unlisten(self):
-        """UNLISTEN and release the bus."""
-        self.atn(0x3F)
-        self.set(release=ATN)
-        self.delay(20)
-        self.set(release=ALL)
-
-    def talk(self, dev, sa):
-        """TALK dev with secondary sa and perform the turnaround."""
-        self.atn(0x40 + dev, sa)
-        self.set(release=ATN, assert_=DATA)
-        self.delay(20)
-        self.set(release=CLK)
-        self._must(_clk_asr, T_FRAME, "turnaround")
-
-    def untalk(self):
-        """UNTALK and release the bus."""
-        self.atn(0x5F)
-        self.set(release=ATN)
-        self.delay(20)
-        self.set(release=ALL)
-
-    def read(self, dev, ch, limit=None):
-        """TALK and read bytes until EOI (or limit bytes), then UNTALK."""
-        self.talk(dev, 0x60 | ch)
-        out = bytearray()
-        try:
-            while limit is None or len(out) < limit:
-                b, eoi = self.recv()
-                out.append(b)
-                if eoi:
-                    break
-        finally:
-            self.untalk()
-        return bytes(out)
-
-    def open(self, dev, ch, name):
-        """OPEN channel ch with a filename."""
-        self.listen(dev, 0xF0 | ch)
-        self.write(name)
-        self.unlisten()
-
-    def close(self, dev, ch):
-        """CLOSE channel ch."""
-        self.listen(dev, 0xE0 | ch)
-        self.unlisten()
-
-    def load(self, name, dev=8):
-        """OPEN/read/CLOSE channel 0."""
-        self.open(dev, 0, name)
-        try:
-            return self.read(dev, 0)
-        finally:
-            self.close(dev, 0)
-
-    def save(self, name, data, dev=8):
-        """OPEN/write/CLOSE channel 1."""
-        self.open(dev, 1, name)
-        self.listen(dev, 0x61)
-        self.write(data)
-        self.unlisten()
-        self.close(dev, 1)
-
-    def command(self, cmd, dev=8):
-        """Send a DOS command on channel 15."""
-        self.listen(dev, 0x6F)
-        self.write(cmd)
-        self.unlisten()
-
-    def status(self, dev=8):
-        """Read the status string from channel 15."""
-        return self.read(dev, 15)

@@ -114,8 +114,16 @@ uint8_t kd_load(const void *name, uint8_t len, uint8_t *addr, uint16_t *end) {
     uint16_t at = lo | (uint8_t)kd_getb() << 8;
     if (!(iec_st & ST_RTO)) {
       uint8_t *p = addr ? addr : (uint8_t *)at;
-      for (int16_t c; (c = kd_getb()) >= 0;)
-        *p++ = c;
+      if (iec_jiffy & 0x80 && !iec_st && *(const uint8_t *)name != '$') {
+        iec_untlk();
+        iec_talk(kd_dev);
+        iec_tksa(0x61);
+        if (!iec_st)
+          p = (uint8_t *)iec_jload((uint16_t)p);
+      } else {
+        for (int16_t c; (c = kd_getb()) >= 0;)
+          *p++ = c;
+      }
       if (end)
         *end = (uint16_t)p;
     }

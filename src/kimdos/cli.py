@@ -4,6 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from . import bench
 from .build import build
 from .iec import Drive
 from .sim import INPUT, Kim
@@ -38,7 +39,8 @@ def cmd_sim(args, stdin=sys.stdin, stdout=sys.stdout):
     """Run the shell interactively on a simulated board and drive."""
     image = build(args.org)
     files = read_dir(args.dir) if args.dir else {}
-    kim = Kim(image.binary, image.org, drives=Drive(files=files))
+    drive = Drive(files=files, jiffy=None if args.no_jiffy else bench.TIMINGS["lpc"])
+    kim = Kim(image.binary, image.org, drives=drive)
     kim.mpu.pc = image.org
     shown = 0
     while True:
@@ -52,6 +54,17 @@ def cmd_sim(args, stdin=sys.stdin, stdout=sys.stdout):
         kim.type(line.rstrip("\n") + "\r")
     if args.dir:
         write_dir(args.dir, kim.drive.files)
+
+
+def cmd_bench(args):
+    """Print cycles per byte, standard and JiffyDOS, and Jiffy timing margins."""
+    rows, margins = bench.report(build(args.org))
+    print("| | Standard | JiffyDOS |\n| --- | --- | --- |")
+    for op, std, jif in rows:
+        print("| %s | %.0f | %.0f |" % (op, std, jif))
+    print("\n| Device timing | Latency, us | Margin, us |\n| --- | --- | --- |")
+    for timing, lat, m in margins:
+        print("| %s | %d | %.2f |" % (timing, lat, m))
 
 
 def cmd_board(args):  # pragma: no cover - needs a board on a serial line
@@ -76,7 +89,11 @@ def build_parser():
     )
     sim = sub.add_parser("sim", help="run the shell on a simulated KIM-1")
     sim.add_argument("--dir", help="host directory of .prg files to serve")
+    sim.add_argument("--no-jiffy", action="store_true", help="a drive without JiffyDOS")
     sim.set_defaults(func=cmd_sim)
+    sub.add_parser(
+        "bench", help="simulated throughput and JiffyDOS timing margins"
+    ).set_defaults(func=cmd_bench)
     board = sub.add_parser("board", help="run shell commands on a board")
     board.add_argument("--port", required=True)
     board.add_argument("--baud", type=int, default=1200)

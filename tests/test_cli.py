@@ -24,3 +24,12 @@ def test_sim_without_directory_stops_at_monitor():
 def test_build(capsys):
     main(["build"])
     assert capsys.readouterr().out.strip().endswith("kimdos-2000.ptp")
+
+
+def test_bench_table(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "kimdos.bench.report", lambda image: ([("read", 500.4, 250.6)], [("lpc", 0, 4)])
+    )
+    main(["bench"])
+    out = capsys.readouterr().out
+    assert "| read | 500 | 251 |" in out and "| lpc | 0 | 4.00 |" in out
