@@ -1,5 +1,7 @@
 """The 6502 library and shell, run on the simulated KIM-1 against a drive."""
 
+import random
+
 import pytest
 
 from kimdos.iec import Drive
@@ -17,7 +19,10 @@ TIMINGS = [
 def machine(image, files=None, **kw):
     """A simulated KIM-1 running the image, with one drive."""
     drive = Drive(files=dict(files or {}), **kw)
-    return Kim(image.binary, image.org, drives=drive), drive
+    kim = Kim(image.binary, image.org, drives=drive)
+    bss = random.Random(image.org).randbytes(image["__BSS_SIZE__"])
+    kim.write(image["__BSS_RUN__"], bss)
+    return kim, drive
 
 
 def shell(image, *lines, files=None, **kw):

@@ -285,8 +285,6 @@ c_save: jsr getname
         adc #0
         sta dos_end+1
         jsr dos_save
-        lda iec_st
-        bmi fnodev
         jmp status
 
 ; #[device], decimal

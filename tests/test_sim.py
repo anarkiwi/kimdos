@@ -85,7 +85,9 @@ def test_save_replace_exists():
     d, h = rig()
     h.save(b"0:NEW", b"\x00\x20abc")
     assert d.files[b"NEW"] == b"\x00\x20abc"
-    h.save(b"NEW", b"\x00\x20xyz")
+    with pytest.raises(BusTimeout):
+        h.save(b"NEW", b"\x00\x20xyz")
+    h.unlisten()
     assert h.status() == b"63,FILE EXISTS,00,00\r"
     assert d.files[b"NEW"] == b"\x00\x20abc"
     h.save(b"@0:NEW", b"\x00\x20xyz")
@@ -313,3 +315,11 @@ def test_ram_protect():
     k = Kim(bytes.fromhex("a9558d00208d00104c4f1c"), ram=[(0, 0x13FF)])
     assert k.run() == MONITOR
     assert k.read(0x2000) == b"\0" and k.read(0x1000) == b"\x55"
+
+
+def test_listen_data_without_eoi_is_a_violation():
+    d, h = rig()
+    h.listen(8, 0x6F)
+    h.send(ord("I"))
+    h.unlisten()
+    assert any("without EOI" in e for e in d.errors)
