@@ -23,14 +23,14 @@ jobs:
           python-version: "3.13"
       - run: sudo apt-get install -y cc65
       - run: pip install -e .
-      - run: docker pull "$(sed -n 's/^FROM //p' c/Dockerfile)"
-      - run: make ORG=2000 && make ORG=0400 && make ORG=C000 && make clib
+      - run: docker pull "$(sed -n 's/^FROM //p' src/kimdos/c/Dockerfile)"
+      - run: make images && make clib
       - name: collect
         run: |
           version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
           mkdir dist
-          git archive --format=tar.gz --prefix="kimdos-c-$version/" -o "dist/kimdos-c-$version.tar.gz" HEAD c LICENSE
-          cp build/kimdos-*.bin build/kimdos-*.ptp build/kimdos-*.lbl build/c/libkimdos.a c/include/kimdos.h dist/
+          git archive --format=tar.gz --prefix="kimdos-c-$version/" --add-file=LICENSE -o "dist/kimdos-c-$version.tar.gz" HEAD:src/kimdos/c
+          cp src/kimdos/images/* build/c/libkimdos.a src/kimdos/c/include/kimdos.h dist/
           ls -l dist
       - uses: actions/upload-artifact@v7
         with:
@@ -49,9 +49,12 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
-      - run: pip install build twine
+      - run: sudo apt-get install -y cc65
+      - run: pip install build twine "kimtape>=0.1.1"
+      - run: make images
       - run: python -m build
       - run: twine check --strict dist/*
+      - run: python tools/check_dist.py dist
       - name: tag matches version
         if: github.event_name == 'release'
         run: |
@@ -61,6 +64,7 @@ jobs:
         run: |
           pip install dist/*.whl
           kimdos --help
+          ls "$(python -m kimdos.clib)/include/kimdos.h"
       - uses: actions/upload-artifact@v7
         with:
           name: dist

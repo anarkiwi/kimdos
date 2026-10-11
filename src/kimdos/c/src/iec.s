@@ -21,10 +21,11 @@ ST_DNP  = 0x80
 
 T_SETUP = 40                    ; talker bit setup and valid times, us
 T_VALID = 40
-EOI_POLLS = 28                  ; 11-cycle polls: just over 300 us
-FRAME_POLLS = 100               ; about 1.1 ms
-JDET_POLLS = 36                 ; 11-cycle polls: 400 us for a JiffyDOS reply
-JACK_POLLS = 100                ; its end, about 1.1 ms
+POLL = 11                       ; cycles per poll: bit, branch, dex, bne
+EOI_POLLS = 308 / POLL          ; past the talker's EOI delay
+FRAME_POLLS = 1100 / POLL       ; past the frame acknowledge limit
+JDET_POLLS = 396 / POLL         ; past a JiffyDOS reply
+JACK_POLLS = 1100 / POLL        ; past its end
 
 ; Busy-wait about us microseconds at 1 MHz; clobbers A and C.
 .macro  DELAY us
@@ -311,7 +312,7 @@ jarm:   and #0x1F
         sta iec_jiffy
         rts
 
-; Before bit 7, with CLK held: a reply 218 us after CLK fell lasts 101 us.
+; Before bit 7, with CLK held: poll for the reply, then wait out its end.
 ; Returns X = 1, Z = 0 for the last bit.
 jdetect:
         lsr jdet
@@ -395,7 +396,7 @@ jrx:    php
 
 ; Send A as talker, C = 1 for EOI.  Cycle offsets from W, the write that
 ; releases CLK.  The device samples at W+17..19, 30..32, 41..43, 54..56 and
-; the EOI flag at W+67, then pulls DATA from W+73 for 10 us.
+; the EOI flag at W+67, then pulls DATA from W+73 (docs/protocol.md).
         .section .text.iec_jtx,"ax",@progbits
 jtx:    sta txb
         ror eoi

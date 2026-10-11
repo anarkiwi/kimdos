@@ -223,6 +223,7 @@ __marimo__/
 
 # build output
 build/
+src/kimdos/images/
 logs/
 
 # local worktrees

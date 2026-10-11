@@ -4,10 +4,11 @@
 sudo apt-get install cc65
 pip install -e ".[dev]"
 make ORG=2000
+make images                     # the packaged images
 make clib                       # llvm-mos, in docker
 pytest                          # xdist, coverage
-black src tests
-pylint src/kimdos tests
+black src tests tools
+pylint src/kimdos tests tools
 ```
 
 ## Layout
@@ -20,12 +21,14 @@ pylint src/kimdos tests
 | `asm/app/shell.s` | the resident image: jump table, keypad entries, shell |
 | `asm/include/kimdos.inc` | the library interface |
 | `asm/cfg/ram.cfg` | ld65 layout for a RAM image at `__ORG__` |
-| `c/include/kimdos.h` | the C library interface |
-| `c/src/` | the C library: `iec.s` bus, `dos.c` files, `dir.c` directory, `con.s` TTY |
-| `c/kim1/` | llvm-mos KIM-1 platform: `link.ld`, `crt.s` |
-| `c/test/kdtest.c` | C library exerciser run by `tests/test_clib.py` |
-| `c/Dockerfile` | pins the llvm-mos toolchain image |
-| `src/kimdos/` | build helper, simulator, board driver, CLI |
+| `src/kimdos/c/include/kimdos.h` | the C library interface |
+| `src/kimdos/c/src/` | the C library: `iec.s` bus, `dos.c` files, `dir.c` directory, `con.s` TTY |
+| `src/kimdos/c/kim1/` | llvm-mos KIM-1 platform: `link.ld`, `crt.s` |
+| `src/kimdos/c/test/kdtest.c` | C library exerciser run by `tests/test_clib.py` |
+| `src/kimdos/c/Dockerfile` | pins the llvm-mos toolchain image |
+| `src/kimdos/` | build helper, simulator, board driver, CLI; `clib.py` locates the packaged C library |
+| `src/kimdos/images/` | `make images`: the shell at $0400, $2000 and $C000, packaged in the wheel (`kimdos.build.packaged`) |
+| `tools/check_dist.py` | checks a built sdist and wheel carry the C library and images |
 
 ## The simulator
 
@@ -92,8 +95,9 @@ token): PyPI project `kimdos`, owner `anarkiwi`, repository `kimdos`, workflow
 1. Bump `version` in `pyproject.toml` and merge.
 2. Publish a GitHub release tagged `v<version>`.
 
-The workflow checks the tag matches the version, publishes the wheel and
-sdist to PyPI, and attaches to the release the shell images
+The workflow checks the tag matches the version, builds the images into the
+package, checks the sdist and wheel with `tools/check_dist.py`, publishes
+them to PyPI, and attaches to the release the shell images
 (`kimdos-{2000,0400,C000}.{bin,ptp,lbl}`), `libkimdos.a`, `kimdos.h` and a
 source tarball of the C library. Run from `workflow_dispatch` it is a dry run:
 it builds everything and uploads it as workflow artifacts only.

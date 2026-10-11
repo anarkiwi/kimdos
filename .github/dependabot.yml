@@ -9,6 +9,6 @@ updates:
     schedule:
       interval: weekly
   - package-ecosystem: docker
-    directory: /c
+    directory: /src/kimdos/c
     schedule:
       interval: weekly
