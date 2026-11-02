@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "Commodore serial bus disk library and shell for the KIM-1 and its replicas"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 authors = [{ name = "anarkiwi" }]
 keywords = ["kim-1", "6502", "iec", "1541", "sd2iec", "pal-ii", "retrocomputing"]
 dependencies = [
@@ -42,7 +42,7 @@ omit = ["*/board.py"]
 
 [tool.black]
 line-length = 88
-target-version = ["py311"]
+target-version = ["py312"]
 
 [tool.pylint.main]
 source-roots = ["src"]
