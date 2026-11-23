@@ -13,7 +13,7 @@ authors = [{ name = "anarkiwi" }]
 keywords = ["kim-1", "6502", "iec", "1541", "sd2iec", "pal-ii", "retrocomputing"]
 dependencies = [
     "kimtape>=0.1.1",
-    "py65",
+    "jennings>=0.24.0",
     "tqdm",
 ]
 

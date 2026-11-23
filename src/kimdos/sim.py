@@ -1,14 +1,14 @@
-"""KIM-1 machine: py65 6502 with monitor traps and a serial bus user port.
+"""KIM-1 machine: jennings 6502 with monitor traps and a serial bus user port.
 
 User port wiring: PA3/PA4/PA5 drive ATN/CLK/DATA through inverting open
 collector buffers (pin high asserts the line); PA6/PA7 read CLK/DATA.
 """
 
-from collections import deque
+from collections import defaultdict, deque
 from typing import NamedTuple
 
-from py65.devices.mpu6502 import MPU
-from py65.memory import ObservableMemory
+from jennings.devices.mpu6502 import MPU
+from jennings.memory import ObservableMemory
 
 from .iec import ALL, Bus, Drive
 
@@ -21,13 +21,28 @@ ACCESS_CYCLE = 3
 CYCLES, INPUT, MONITOR, RETURN, ROM_CALL = "cycles", "input", "monitor", "return", "rom"
 
 
+def push_word(mpu, value):
+    """Push a 16-bit value on the 6502 stack, high byte first."""
+    for byte in (value >> 8, value):
+        mpu.memory[0x100 + mpu.sp] = byte & 0xFF
+        mpu.sp = (mpu.sp - 1) & 0xFF
+
+
+def pop_word(mpu):
+    """Pull a 16-bit value from the 6502 stack."""
+    lo = mpu.memory[0x100 + (mpu.sp + 1 & 0xFF)]
+    hi = mpu.memory[0x100 + (mpu.sp + 2 & 0xFF)]
+    mpu.sp = (mpu.sp + 2) & 0xFF
+    return lo | hi << 8
+
+
 class Memory(ObservableMemory):
     """ObservableMemory with a fast path for unobserved addresses."""
 
     def __init__(self):
         super().__init__()
-        self._read_subscribers = {}
-        self._write_subscribers = {}
+        self._read_subscribers = defaultdict(list)
+        self._write_subscribers = defaultdict(list)
 
     def __getitem__(self, address):
         cbs = self._read_subscribers.get(address)
@@ -201,7 +216,7 @@ class Kim:  # pylint: disable=too-many-instance-attributes
     def _rts(self, chars):
         m = self.mpu
         m.x, m.y = 0xA5, 0x5A
-        m.pc = (m.stPopWord() + 1) & 0xFFFF
+        m.pc = (pop_word(m) + 1) & 0xFFFF
         m.processorCycles += chars * self.char_cycles
 
     def _getch(self):
@@ -244,7 +259,7 @@ class Kim:  # pylint: disable=too-many-instance-attributes
     ):  # pylint: disable=too-many-arguments,too-many-positional-arguments
         """JSR to address and run until it returns; return CallResult."""
         m = self.mpu
-        m.stPushWord(SENTINEL - 1)
+        push_word(m, SENTINEL - 1)
         m.pc, m.a, m.x, m.y = address, a, x, y
         m.p = m.p & 0xFE | int(carry)
         c0 = m.processorCycles
