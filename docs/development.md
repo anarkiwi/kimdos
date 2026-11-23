@@ -32,7 +32,7 @@ pylint src/kimdos tests tools
 
 ## The simulator
 
-`kimdos.sim.Kim` runs the image on py65 with the monitor's `GETCH`,
+`kimdos.sim.Kim` runs the image on jennings with the monitor's `GETCH`,
 `OUTCH` and `START` trapped, and a 6530 at $1700 wired to the bus as the
 adapter is. `kimdos.iec.Drive` is an independent model of a drive written from
 the bus protocol: files, directory, status channel, DOS commands, and the
